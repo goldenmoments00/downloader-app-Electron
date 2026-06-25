@@ -1,0 +1,84 @@
+{
+  "name": "golden-media-hub",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:win": "tsc -b && vite build && electron-builder --win",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.goldenmedia.hub",
+    "productName": "GM HUB",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/icon-256.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GM HUB",
+      "artifactName": "GM HUB Setup.${ext}",
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "GM HUB"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://example.com/updates"
+      }
+    ]
+  },
+  "dependencies": {
+    "axios": "^1.18.1",
+    "better-sqlite3": "^12.11.1",
+    "clsx": "^2.1.1",
+    "electron-updater": "^6.8.9",
+    "lucide-react": "^1.21.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tailwind-merge": "^3.6.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "autoprefixer": "^10.4.18",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "oxlint": "^1.69.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.0",
+    "vite-plugin-electron": "^1.1.0",
+    "vite-plugin-electron-renderer": "^1.0.0",
+    "wait-on": "^9.0.10"
+  }
+}
