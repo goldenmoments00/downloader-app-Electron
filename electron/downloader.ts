@@ -7,6 +7,8 @@ export interface DownloadJob {
   url: string;
   quality: string;
   outputPath: string;
+  cleanName?: string;
+  embedArtwork?: boolean;
 }
 
 export function startDownload(job: DownloadJob, mainWindow: BrowserWindow | null) {
@@ -48,6 +50,13 @@ export function startDownload(job: DownloadJob, mainWindow: BrowserWindow | null
 
   if (job.quality === 'Audio Only') {
     args.splice(args.length - 1, 0, '-x', '--audio-format', 'mp3');
+    
+    if (job.embedArtwork) {
+      args.splice(args.length - 1, 0, '--embed-metadata', '--embed-thumbnail', '--convert-thumbnails', 'jpg');
+      if (job.cleanName) {
+        args.splice(args.length - 1, 0, '--replace-in-metadata', 'title', '.*', job.cleanName);
+      }
+    }
   } else {
     args.splice(args.length - 1, 0, '--merge-output-format', 'mp4');
   }
@@ -96,6 +105,9 @@ export function startDownload(job: DownloadJob, mainWindow: BrowserWindow | null
     logStream.write(`[ERROR] Failed to spawn child process: ${err.message}\n`);
     logStream.end();
     console.error('Failed to start download process:', err);
+    import('electron').then(({ dialog }) => {
+      dialog.showErrorBox('Download Error', `Failed to start download.\nPath: ${binPath}\nError: ${err.message}`);
+    });
     mainWindow.webContents.send('download-complete', {
       id: job.id,
       success: false
@@ -110,26 +122,59 @@ export function getVideoInfo(url: string): Promise<string | null> {
     const binDir = app.isPackaged ? join(process.resourcesPath, 'bin') : join(process.cwd(), 'bin');
     const binPath = join(binDir, 'yt-dlp.exe');
 
-    const child = spawn(binPath, ['--print', 'title', url], {
+    let isResolved = false;
+
+    const child = spawn(binPath, ['--print', 'title', '--no-playlist', url], {
       stdio: ['ignore', 'pipe', 'ignore']
     });
+
+    // Add a 30-second timeout
+    const timeout = setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true;
+        console.error('getVideoInfo timed out after 30 seconds');
+        child.kill(); // Kill the hung process
+        resolve(null);
+      }
+    }, 30000);
 
     let output = '';
 
     child.stdout.on('data', (data) => {
       output += data.toString();
+      // As soon as we get a non-empty line on stdout, resolve it!
+      const lines = output.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length > 0 && !isResolved) {
+        isResolved = true;
+        clearTimeout(timeout);
+        child.kill(); // We got what we need, kill the process to save resources
+        resolve(lines[0]);
+      }
     });
 
-    child.on('close', (code) => {
-      if (code === 0 && output.trim()) {
-        resolve(output.trim());
+    child.on('close', (_code) => {
+      if (isResolved) return;
+      isResolved = true;
+      clearTimeout(timeout);
+      
+      const lines = output.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length > 0) {
+        resolve(lines[0]);
       } else {
         resolve(null);
       }
     });
 
     child.on('error', (err) => {
+      if (isResolved) return;
+      isResolved = true;
+      clearTimeout(timeout);
+      
       console.error('Failed to get video info:', err);
+      // Show an error popup so we can debug on other PCs!
+      import('electron').then(({ dialog }) => {
+        dialog.showErrorBox('getVideoInfo Error', `Failed to run yt-dlp.exe.\nPath: ${binPath}\nError: ${err.message}`);
+      });
       resolve(null);
     });
   });

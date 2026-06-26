@@ -6,10 +6,12 @@ const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
 export interface AppSettings {
   nasRootPath: string;
+  embedArtwork: boolean;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  nasRootPath: '\\\\AS6604T-631E\\Video-Store\\FOR EDIORS\\SONG'
+  nasRootPath: '\\\\AS6604T-631E\\Video-Store\\FOR EDIORS\\SONG',
+  embedArtwork: true
 };
 
 export function getSettings(): AppSettings {

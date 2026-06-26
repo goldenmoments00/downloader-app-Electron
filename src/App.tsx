@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, Minus, Maximize2, Minimize2, ClipboardPaste, DownloadCloud, Flame, Settings } from 'lucide-react';
+import { X, Minus, ClipboardPaste, Flame, Settings } from 'lucide-react';
 import HomeView from './components/HomeView';
 import { useNasStore } from './store/useNasStore';
 import SettingsModal from './components/SettingsModal';
@@ -8,7 +8,7 @@ import NasRecoveryModal from './components/NasRecoveryModal';
 type AnimState = 'idle' | 'minimizing' | 'restoring' | 'closing';
 
 function App() {
-  const [isCompactMode, setIsCompactMode] = useState(false);
+  const [isCompactMode] = useState(false);
   const [isIconMode, setIsIconMode] = useState(false);
   const [clipboardUrl, setClipboardUrl] = useState('');
   const [showClipboardToast, setShowClipboardToast] = useState(false);
@@ -67,6 +67,9 @@ function App() {
       try {
         const settings = await window.electronAPI.getSettings();
         setNasRootPath(settings.nasRootPath);
+        if (settings.embedArtwork !== undefined) {
+          useNasStore.getState().setEmbedArtwork(settings.embedArtwork);
+        }
 
         const status = await window.electronAPI.getNasStatus();
         setStatus(status);
@@ -113,16 +116,6 @@ function App() {
     }, 300);
   };
 
-  const toggleCompactMode = () => {
-    const newCompact = !isCompactMode;
-    setIsCompactMode(newCompact);
-    if (newCompact) {
-      window.electronAPI?.resizeWindow(320, 240);
-    } else {
-      window.electronAPI?.resizeWindow(320, 500);
-    }
-  };
-
   const handlePasteClipboard = () => {
     const event = new CustomEvent('paste-url', { detail: clipboardUrl });
     window.dispatchEvent(event);
@@ -160,34 +153,33 @@ function App() {
       <div className="absolute top-[-20%] left-[-10%] w-64 h-64 bg-primary/20 rounded-full blur-[80px] pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-80 h-80 bg-accent/10 rounded-full blur-[100px] pointer-events-none" />
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-hidden relative z-10 flex flex-col non-draggable">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 pt-3 custom-scrollbar">
-          <HomeView isCompactMode={isCompactMode} />
+      {/* macOS Style Titlebar */}
+      <div className="h-10 bg-white/30 border-b border-white/40 flex items-center justify-between px-4 draggable shrink-0 z-50 backdrop-blur-xl">
+        {/* Left: Traffic Lights & Title */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 non-draggable mt-[1px]">
+            <button onClick={handleClose} className="w-3.5 h-3.5 rounded-full bg-[#FF5F56] hover:bg-[#FF5F56]/80 border border-black/10 flex items-center justify-center group shadow-sm transition-colors">
+              <X size={9} strokeWidth={3} className="opacity-0 group-hover:opacity-100 text-[#4D0000] transition-opacity" />
+            </button>
+            <button onClick={handleMinimize} className="w-3.5 h-3.5 rounded-full bg-[#FFBD2E] hover:bg-[#FFBD2E]/80 border border-black/10 flex items-center justify-center group shadow-sm transition-colors">
+              <Minus size={9} strokeWidth={3} className="opacity-0 group-hover:opacity-100 text-[#5C3D00] transition-opacity" />
+            </button>
+            <button onClick={() => setShowSettings(true)} className="w-3.5 h-3.5 rounded-full bg-[#27C93F] hover:bg-[#27C93F]/80 border border-black/10 flex items-center justify-center group shadow-sm transition-colors" title="Settings">
+              <Settings size={9} strokeWidth={3} className="opacity-0 group-hover:opacity-100 text-[#004D00] transition-opacity" />
+            </button>
+          </div>
+          <div className="w-px h-4 bg-black/10 mx-1" />
+          <div className="flex items-center gap-2 text-[11px] font-bold tracking-widest text-text-primary bg-white/50 px-2.5 py-1 rounded-full border border-white/60 shadow-sm backdrop-blur-md">
+            <div className="w-2 h-2 rounded-full bg-gradient-to-tr from-accent to-primary shadow-[0_0_8px_rgba(255,122,0,0.6)]" />
+            GM HUB
+          </div>
         </div>
       </div>
 
-      {/* Premium Footer (formerly Titlebar) */}
-      <div className="h-10 bg-white/30 border-t border-white/40 flex items-center justify-between px-4 draggable shrink-0 z-50 backdrop-blur-xl">
-        <div className="flex items-center gap-2 text-[12px] font-bold tracking-wide text-text-primary">
-          <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-tr from-accent to-primary shadow-[0_0_12px_rgba(255,122,0,0.5)]" />
-          GM HUB
-        </div>
-        <div className="flex items-center gap-2 non-draggable">
-          <button onClick={() => setShowSettings(true)} className="p-1.5 bg-white/0 hover:bg-white/40 rounded-md transition-colors text-text-secondary hover:text-text-primary">
-            <Settings size={14} />
-          </button>
-          <div className="w-px h-3.5 bg-border mx-1" />
-          <button onClick={toggleCompactMode} className="p-1.5 bg-white/0 hover:bg-white/40 rounded-md transition-colors text-text-secondary hover:text-text-primary">
-            {isCompactMode ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
-          </button>
-          <div className="w-px h-3.5 bg-border mx-1" />
-          <button onClick={handleMinimize} className="p-1.5 bg-white/0 hover:bg-white/40 rounded-md transition-colors text-text-secondary hover:text-text-primary">
-            <Minus size={14} />
-          </button>
-          <button onClick={handleClose} className="p-1.5 bg-white/0 hover:bg-highlight hover:text-white rounded-md transition-colors text-text-secondary">
-            <X size={14} />
-          </button>
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-hidden relative z-10 flex flex-col non-draggable">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-1 py-3 custom-scrollbar">
+          <HomeView isCompactMode={isCompactMode} />
         </div>
       </div>
 
@@ -205,16 +197,7 @@ function App() {
         </button>
       </div>
 
-      {/* Status Bar */}
-      <div className="h-8 bg-white/30 border-t border-white/40 flex items-center justify-between px-4 text-[10px] font-bold text-text-secondary tracking-wide shrink-0 z-50 backdrop-blur-xl">
-        <div className="flex items-center gap-2 text-secondary drop-shadow-sm">
-          <DownloadCloud size={13} />
-          Downloader Ready
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-text-secondary/60">v1.0.0</span>
-        </div>
-      </div>
+
 
       {/* NAS Recovery Auto-Popup */}
       {(status === 'Offline' || status === 'Access Denied') && !showSettings && (

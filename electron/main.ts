@@ -26,7 +26,7 @@ function createWindow() {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
-    resizable: true,
+    resizable: false,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -159,20 +159,20 @@ ipcMain.handle('get-video-info', async (_, url) => {
   return await getVideoInfo(url);
 });
 
-ipcMain.handle('check-duplicate', (_, targetDir, baseName, ext) => {
-  // Global search using the SQLite index
-  const matches = searchDuplicate(baseName, ext);
+ipcMain.handle('check-duplicate', (_, targetDir, cleanName, brandedName, ext) => {
+  // Global search using the SQLite index (which searches clean_name OR filename)
+  const matches = searchDuplicate(cleanName);
   
-  // Also check if it exists exactly in the targetDir to calculate nextVersionName
-  const exactTargetExists = fs.existsSync(join(targetDir, `${baseName}${ext}`));
+  // Also check if it exists exactly in the targetDir with the BRANDED name to calculate nextVersionName
+  const exactTargetExists = fs.existsSync(join(targetDir, `${brandedName}${ext}`));
   
-  let nextVersionName = `${baseName}${ext}`;
+  let nextVersionName = `${brandedName}${ext}`;
   if (exactTargetExists) {
     let counter = 2;
-    while (fs.existsSync(join(targetDir, `${baseName} (${counter})${ext}`))) {
+    while (fs.existsSync(join(targetDir, `${brandedName} (${counter})${ext}`))) {
       counter++;
     }
-    nextVersionName = `${baseName} (${counter})${ext}`;
+    nextVersionName = `${brandedName} (${counter})${ext}`;
   }
   
   return { 

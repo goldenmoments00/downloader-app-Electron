@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link2, Download, X, Play, Pause, XCircle, Folder, ServerCrash, RefreshCw, Wifi, Server, Sparkles, Monitor, Laptop, Smartphone, Headphones, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Link2, Download, X, Play, Pause, Folder, ServerCrash, RefreshCw, Wifi, Server, Sparkles, Monitor, Laptop, Smartphone, Headphones, ExternalLink, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useNasStore } from '../store/useNasStore';
-import { cleanFilename } from '../utils/fileNaming';
+import { cleanFilename, getBrandedFilename } from '../utils/fileNaming';
 
 interface HomeViewProps {
   isCompactMode?: boolean;
@@ -33,7 +33,17 @@ const qualityIcons = {
 
 export default function HomeView({ isCompactMode }: HomeViewProps) {
   const { setActiveDownloads } = useStore();
-  const { status, folders, selectedCategory, setSelectedCategory, nasRootPath } = useNasStore();
+  const {
+    status,
+    folders,
+    selectedCategory,
+    nasRootPath,
+    setSelectedCategory,
+    destinationMode,
+    customFolder,
+    setDestinationMode,
+    setCustomFolder
+  } = useNasStore();
   const [url, setUrl] = useState('');
   const [selectedQuality, setSelectedQuality] = useState(qualities[0]);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
@@ -41,9 +51,11 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   const [isFetchingInfo, setIsFetchingInfo] = useState(false);
+  const [analyzeCountdown, setAnalyzeCountdown] = useState<number | null>(null);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{
     cleanName: string;
+    brandedName: string;
     targetDir: string;
     ext: string;
     url: string;
@@ -126,26 +138,35 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
     }
   };
 
+  const handleSelectCustomFolder = async () => {
+    const path = await window.electronAPI.selectFolder();
+    if (path) {
+      setCustomFolder(path);
+    }
+  };
+
   const handleDownload = async () => {
-    if (!isValidUrl()) {
-      alert("Invalid URL");
-      return;
-    }
-    if (!window.electronAPI) {
-      alert("electronAPI is not available");
-      return;
-    }
-    if (status !== 'Connected') {
-      alert("NAS is not connected.");
-      return;
-    }
-    if (!selectedCategory) {
-      alert("Please select a Destination Category.");
-      return;
-    }
-    
+    if (!isValidUrl() || isFetchingInfo) return;
+    if (destinationMode === 'nas' && (!selectedCategory || status !== 'Connected')) return;
+    if (destinationMode === 'custom' && !customFolder) return;
+
     setIsFetchingInfo(true);
+    setAnalyzeCountdown(15);
+    
+    const countdownInterval = setInterval(() => {
+      setAnalyzeCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownInterval);
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
     let originalTitle = await window.electronAPI.getVideoInfo(url);
+    
+    clearInterval(countdownInterval);
+    setAnalyzeCountdown(null);
     setIsFetchingInfo(false);
 
     if (!originalTitle) {
@@ -154,18 +175,26 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
     }
 
     const cleanName = cleanFilename(originalTitle);
+    const brandedName = getBrandedFilename(cleanName);
     const ext = selectedQuality === 'Audio Only' ? '.mp3' : '.mp4';
     
-    const separator = nasRootPath.includes('\\') ? '\\' : '/';
-    const cleanRoot = nasRootPath.endsWith(separator) ? nasRootPath.slice(0, -1) : nasRootPath;
-    const targetDir = `${cleanRoot}${separator}${selectedCategory}`;
+    const separator = (destinationMode === 'custom' ? customFolder : nasRootPath).includes('\\') ? '\\' : '/';
+    let targetDir = '';
+    
+    if (destinationMode === 'nas') {
+      const cleanRoot = nasRootPath.endsWith(separator) ? nasRootPath.slice(0, -1) : nasRootPath;
+      targetDir = `${cleanRoot}${separator}${selectedCategory}`;
+    } else {
+      targetDir = customFolder.endsWith(separator) ? customFolder.slice(0, -1) : customFolder;
+    }
 
     try {
-      const duplicateStatus = await window.electronAPI.checkDuplicate(targetDir, cleanName, ext);
+      const duplicateStatus = await window.electronAPI.checkDuplicate(targetDir, cleanName, brandedName, ext);
 
       if (duplicateStatus.exists) {
         setDuplicateInfo({
           cleanName,
+          brandedName,
           targetDir,
           ext,
           url,
@@ -177,7 +206,7 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
         return;
       }
 
-      startActualDownload(`${cleanName}${ext}`, targetDir, url, selectedQuality, cleanName, selectedCategory);
+      startActualDownload(`${brandedName}${ext}`, targetDir, url, selectedQuality, cleanName, selectedCategory);
     } catch (e: any) {
       alert("Failed to start download: " + e.message);
     }
@@ -204,11 +233,16 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
     setQueue(prev => [...prev, newItem]);
     setActiveDownloads(queue.length + 1);
     
+    // Read the current settings store
+    const { embedArtwork } = useNasStore.getState();
+
     window.electronAPI.startDownload({
       id,
       url: downloadUrl,
       quality,
-      outputPath
+      outputPath,
+      cleanName,
+      embedArtwork
     });
 
     setUrl('');
@@ -219,7 +253,7 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
 
     if (action === 'replace') {
       // Overwrite the existing one in target directory
-      startActualDownload(`${duplicateInfo.cleanName}${duplicateInfo.ext}`, duplicateInfo.targetDir, duplicateInfo.url, duplicateInfo.quality, duplicateInfo.cleanName, selectedCategory);
+      startActualDownload(`${duplicateInfo.brandedName}${duplicateInfo.ext}`, duplicateInfo.targetDir, duplicateInfo.url, duplicateInfo.quality, duplicateInfo.cleanName, selectedCategory);
     } else if (action === 'new') {
       startActualDownload(duplicateInfo.nextVersionName, duplicateInfo.targetDir, duplicateInfo.url, duplicateInfo.quality, duplicateInfo.cleanName, selectedCategory);
     }
@@ -247,7 +281,7 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
   };
 
   return (
-    <div className="p-4 flex flex-col gap-6">
+    <div className="px-2 py-4 flex flex-col gap-6">
 
       {/* NAS Offline Banner */}
       {status !== 'Connected' && status !== 'Connecting' && (
@@ -360,69 +394,110 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
           </div>
         </div>
 
-        {/* Destination Category */}
+        {/* Destination Section */}
         <div className="flex flex-col gap-1.5 relative z-30 mt-1">
-          <div className="relative flex items-center shadow-sm rounded-xl group">
-            <div className="absolute left-3 text-highlight pointer-events-none transition-transform group-hover:scale-110 duration-300">
-              <Folder size={16} />
-            </div>
-            
+          {/* Segmented Control */}
+          <div className="flex bg-white/40 p-1 rounded-xl shadow-sm border border-white/50 backdrop-blur-md relative">
+            <div 
+              className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-out pointer-events-none"
+              style={{ transform: destinationMode === 'nas' ? 'translateX(0)' : 'translateX(calc(100% + 8px))' }}
+            />
             <button
-              onClick={() => folders.length > 0 && setShowCategoryMenu(!showCategoryMenu)}
-              className="w-full bg-white/60 border border-white/50 rounded-xl pl-9 pr-10 py-2.5 text-[13px] text-text-primary text-left focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all shadow-inner backdrop-blur-md font-medium flex items-center cursor-pointer"
-              disabled={folders.length === 0}
+              onClick={() => setDestinationMode('nas')}
+              className={`flex-1 relative z-10 py-1.5 text-[11px] font-bold rounded-lg transition-colors ${destinationMode === 'nas' ? 'text-highlight' : 'text-text-secondary hover:text-text-primary'}`}
             >
-              <span className="truncate flex-1">
-                {selectedCategory || "Select Category"}
-              </span>
+              NAS Category
             </button>
-
-            {showCategoryMenu && (
-              <>
-                <div 
-                  className="fixed inset-0 z-40 bg-black/5 backdrop-blur-sm animate-in fade-in duration-200" 
-                  onClick={() => setShowCategoryMenu(false)} 
-                />
-                <div className="fixed inset-x-4 top-20 bottom-6 bg-white/98 backdrop-blur-3xl border border-white/80 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] z-50 overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
-                  <div className="flex justify-between items-center px-4 py-2.5 border-b border-black/5 bg-white/50 shrink-0">
-                    <span className="text-[10px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5"><Folder size={12} className="text-highlight" /> SELECT CATEGORY</span>
-                    <button onClick={() => setShowCategoryMenu(false)} className="p-1.5 hover:bg-black/5 text-text-secondary hover:text-highlight rounded-lg transition-colors"><X size={14} /></button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto flex flex-col [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/10 [&::-webkit-scrollbar-thumb]:rounded-full">
-                    {folders.map((f, i) => {
-                      const isSelected = selectedCategory === f;
-                      const isLast = i === folders.length - 1;
-                      return (
-                        <button
-                          key={f}
-                          onClick={() => { setSelectedCategory(f); setShowCategoryMenu(false); }}
-                          className={`w-full text-left px-4 py-2.5 text-[13px] transition-all duration-200 ${
-                            !isLast ? 'border-b-[0.5px] border-black/5' : ''
-                          } ${
-                            isSelected 
-                              ? 'bg-gradient-to-r from-primary/10 to-transparent text-highlight font-bold' 
-                              : 'text-black font-medium hover:bg-highlight/10 hover:text-highlight'
-                          }`}
-                        >
-                          <span className="truncate">{f}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-
-            <div className="absolute right-1.5 flex items-center z-30 pointer-events-auto">
-              <button 
-                onClick={() => window.dispatchEvent(new Event('refresh-nas'))}
-                title="Refresh NAS Categories"
-                className="text-highlight hover:text-red-600 transition-colors bg-white/50 hover:bg-white p-1 rounded-lg shadow-sm"
-              >
-                <RefreshCw size={13} className={status === 'Connecting' ? 'animate-spin' : ''} />
-              </button>
-            </div>
+            <button
+              onClick={() => setDestinationMode('custom')}
+              className={`flex-1 relative z-10 py-1.5 text-[11px] font-bold rounded-lg transition-colors ${destinationMode === 'custom' ? 'text-highlight' : 'text-text-secondary hover:text-text-primary'}`}
+            >
+              Custom Folder
+            </button>
           </div>
+
+          {destinationMode === 'nas' ? (
+            <div className="relative flex items-center shadow-sm rounded-xl group mt-0.5">
+              <div className="absolute left-3 text-highlight pointer-events-none transition-transform group-hover:scale-110 duration-300">
+                <Folder size={16} />
+              </div>
+              
+              <button
+                onClick={() => folders.length > 0 && setShowCategoryMenu(!showCategoryMenu)}
+                className="w-full bg-white/60 border border-white/50 rounded-xl pl-9 pr-10 py-2.5 text-[13px] text-text-primary text-left focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all shadow-inner backdrop-blur-md font-medium flex items-center cursor-pointer"
+                disabled={folders.length === 0}
+              >
+                <span className="truncate flex-1">
+                  {selectedCategory || "Select Category"}
+                </span>
+              </button>
+
+              {showCategoryMenu && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40 bg-black/5 backdrop-blur-sm animate-in fade-in duration-200" 
+                    onClick={() => setShowCategoryMenu(false)} 
+                  />
+                  <div className="fixed inset-x-4 top-20 bottom-6 bg-white/98 backdrop-blur-3xl border border-white/80 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] z-50 overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+                    <div className="flex justify-between items-center px-4 py-2.5 border-b border-black/5 bg-white/50 shrink-0">
+                      <span className="text-[10px] font-bold text-text-secondary uppercase tracking-widest flex items-center gap-1.5"><Folder size={12} className="text-highlight" /> SELECT CATEGORY</span>
+                      <button onClick={() => setShowCategoryMenu(false)} className="p-1.5 hover:bg-black/5 text-text-secondary hover:text-highlight rounded-lg transition-colors"><X size={14} /></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto flex flex-col [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/10 [&::-webkit-scrollbar-thumb]:rounded-full">
+                      {folders.map((f, i) => {
+                        const isSelected = selectedCategory === f;
+                        const isLast = i === folders.length - 1;
+                        return (
+                          <button
+                            key={f}
+                            onClick={() => { setSelectedCategory(f); setShowCategoryMenu(false); }}
+                            className={`w-full text-left px-4 py-2.5 text-[13px] transition-all duration-200 ${
+                              !isLast ? 'border-b-[0.5px] border-black/5' : ''
+                            } ${
+                              isSelected 
+                                ? 'bg-gradient-to-r from-primary/10 to-transparent text-highlight font-bold' 
+                                : 'text-black font-medium hover:bg-highlight/10 hover:text-highlight'
+                            }`}
+                          >
+                            <span className="truncate">{f}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div className="absolute right-1.5 flex items-center z-30 pointer-events-auto">
+                <button 
+                  onClick={() => window.dispatchEvent(new Event('refresh-nas'))}
+                  title="Refresh NAS Categories"
+                  className="text-highlight hover:text-red-600 transition-colors bg-white/50 hover:bg-white p-1 rounded-lg shadow-sm"
+                >
+                  <RefreshCw size={13} className={status === 'Connecting' ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="relative flex items-center shadow-sm rounded-xl group mt-0.5">
+              <div className="absolute left-3 text-highlight pointer-events-none transition-transform group-hover:scale-110 duration-300">
+                <Folder size={16} />
+              </div>
+              <div className="w-full bg-white/60 border border-white/50 rounded-xl pl-9 pr-20 py-2.5 text-[13px] text-text-primary text-left transition-all shadow-inner backdrop-blur-md font-medium flex items-center">
+                <span className="truncate flex-1 text-text-secondary">
+                  {customFolder || "Select Folder"}
+                </span>
+              </div>
+              <div className="absolute right-1.5 flex items-center z-30 pointer-events-auto">
+                <button 
+                  onClick={handleSelectCustomFolder}
+                  className="text-[10px] font-bold bg-white/50 hover:bg-white text-text-primary px-2.5 py-1.5 rounded-lg transition-colors shadow-sm"
+                >
+                  CHANGE
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <button
@@ -434,7 +509,7 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
           {isFetchingInfo ? (
             <>
               <RefreshCw size={12} className="animate-spin text-highlight" />
-              ANALYZING LINK...
+              ANALYZING LINK... {analyzeCountdown !== null && `(${analyzeCountdown}s)`}
             </>
           ) : (
             <>
@@ -447,65 +522,76 @@ export default function HomeView({ isCompactMode }: HomeViewProps) {
 
       {/* Queue hide in compact mode */}
       {!isCompactMode && (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-widest px-2 flex justify-between">
-            <span>Active Queue</span>
-            <span>{queue.length}</span>
+        <div className="flex flex-col mt-4">
+          <h3 className="text-[10px] font-medium text-text-secondary uppercase tracking-widest px-2 mb-3">
+            Active Queue
           </h3>
+          
           {queue.length === 0 ? (
-            <div className="bg-white/20 border border-white/40 border-dashed rounded-xl p-4 flex items-center justify-center text-text-secondary font-medium text-[12px] shadow-sm backdrop-blur-md">
-              Queue is empty
+            <div className="text-center text-text-secondary font-light text-[12px] py-4">
+              📥 No active downloads
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-              {queue.map((item) => (
-                <div key={item.id} className="bg-white/40 border border-white/50 rounded-lg p-2.5 shadow-sm backdrop-blur-md flex flex-col gap-2 transition-all hover:bg-white/60">
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-bold text-text-primary truncate">{item.name}</p>
-                      <p className="text-[10px] text-text-secondary font-medium">{item.quality}</p>
-                    </div>
-                    
-                    <div className="flex gap-1 shrink-0 bg-white/40 rounded-lg p-1 border border-white/50 shadow-sm">
-                      {item.status === 'downloading' && (
-                        <button onClick={() => togglePause(item.id)} className="p-2 text-text-secondary hover:text-text-primary rounded-lg hover:bg-white/60 transition-colors"><Pause size={14} /></button>
-                      )}
-                      {item.status === 'paused' && (
-                        <button onClick={() => togglePause(item.id)} className="p-2 text-text-secondary hover:text-text-primary rounded-lg hover:bg-white/60 transition-colors"><Play size={14} /></button>
-                      )}
-                      <button onClick={() => removeJob(item.id)} className="p-2 text-text-secondary hover:text-highlight rounded-lg hover:bg-highlight/10 transition-colors"><XCircle size={14} /></button>
-                    </div>
-                  </div>
+            <div className="flex flex-col gap-2 px-1 mt-2">
+              {queue.map((item) => {
+                const ext = item.quality === 'Audio Only' ? 'mp3' : 'mp4';
+                let statusText = '';
+                if (item.status === 'downloading') {
+                  statusText = item.progress === 100 ? 'Merging' : `${item.progress}%`;
+                } else if (item.status === 'completed') {
+                  statusText = 'Completed';
+                } else if (item.status === 'paused') {
+                  statusText = 'Paused';
+                } else if (item.status === 'error') {
+                  statusText = 'Failed';
+                }
 
-                  <div className="flex flex-col gap-2 relative z-10 mt-1">
-                    <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest">
-                      <span className={item.status === 'completed' ? 'text-green-600' : item.status === 'error' ? 'text-highlight' : 'text-secondary animate-pulse'}>
-                        {item.status === 'downloading' && item.progress === 100 ? 'MERGING...' : item.status}
-                      </span>
-                      <span className="text-text-primary">{item.progress}%</span>
-                    </div>
-                    <div className="h-2 w-full bg-white/50 rounded-full overflow-hidden shadow-inner border border-white/30">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ease-out relative overflow-hidden ${item.status === 'completed' ? 'bg-green-500' : item.status === 'error' ? 'bg-highlight' : 'bg-gradient-to-r from-primary to-accent shadow-[0_0_10px_rgba(255,122,0,0.5)]'}`}
-                        style={{ width: `${item.progress}%` }}
-                      >
-                         {item.status === 'downloading' && <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]" />}
+                return (
+                  <div key={item.id} className="flex flex-col relative group">
+                    <div className="flex items-end gap-2 text-[12px] font-medium text-text-primary py-1">
+                      <div className="shrink-0 w-4 flex items-center justify-center pb-[2px]">
+                        {item.status === 'downloading' && <span className="text-highlight">⬇️</span>}
+                        {item.status === 'paused' && <span className="text-secondary">⏸</span>}
+                        {item.status === 'completed' && <span className="text-green-500">✅</span>}
+                        {item.status === 'error' && <span className="text-red-500">❌</span>}
+                      </div>
+                      
+                      <div className="shrink-0 max-w-[140px] truncate pb-[1px]">
+                        {item.name}.{ext}
+                      </div>
+
+                      <div className="flex-1 border-b-[1.5px] border-dotted border-black/20 mx-1 mb-[5px]" />
+
+                      <div className="shrink-0 text-[11px] pb-[1px] text-text-secondary pr-6">
+                        {statusText}
                       </div>
                     </div>
+
+                    {/* Tiny Progress Bar */}
                     {(item.status === 'downloading' || item.status === 'paused') && (
-                      <div className="flex justify-between text-[10px] text-text-secondary font-mono mt-0.5">
-                        <span>{item.speed}</span>
-                        <span>ETA: {item.eta}</span>
+                      <div className="pl-6 pr-6">
+                        <div className="h-[1px] w-full bg-black/5 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-300 ease-out ${item.status === 'paused' ? 'bg-secondary/40' : 'bg-highlight'}`}
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
                       </div>
                     )}
+
+                    {/* Hover Controls */}
+                    <div className="absolute right-0 top-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-l from-[#F5EFE6] via-[#F5EFE6] to-transparent pl-4 pr-1 flex gap-2 items-center">
+                       {item.status === 'downloading' && <button onClick={() => togglePause(item.id)} className="text-text-secondary hover:text-text-primary transition-colors"><Pause size={13} /></button>}
+                       {item.status === 'paused' && <button onClick={() => togglePause(item.id)} className="text-text-secondary hover:text-text-primary transition-colors"><Play size={13} /></button>}
+                       <button onClick={() => removeJob(item.id)} className="text-text-secondary hover:text-highlight transition-colors"><X size={14} /></button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
-      
       {/* Duplicate File Dialog - Global Search */}
       {showDuplicateDialog && duplicateInfo && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-300">

@@ -3,16 +3,21 @@ import { X, Save, Server, AlertCircle } from 'lucide-react';
 import { useNasStore } from '../store/useNasStore';
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { nasRootPath, setNasRootPath } = useNasStore();
+  const { nasRootPath, setNasRootPath, embedArtwork, setEmbedArtwork } = useNasStore();
   const [localPath, setLocalPath] = useState(nasRootPath);
+  const [localEmbedArtwork, setLocalEmbedArtwork] = useState(embedArtwork);
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       if (window.electronAPI) {
-        await window.electronAPI.saveSettings({ nasRootPath: localPath });
+        await window.electronAPI.saveSettings({ 
+          nasRootPath: localPath,
+          embedArtwork: localEmbedArtwork
+        });
         setNasRootPath(localPath);
+        setEmbedArtwork(localEmbedArtwork);
         
         // Trigger a refresh event
         window.dispatchEvent(new Event('refresh-nas'));
@@ -75,6 +80,22 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <p className="text-[10px] text-highlight/90 leading-tight">
             The application will automatically scan this directory for category folders to display in the dropdown.
           </p>
+        </div>
+
+        <div className="flex items-center justify-between bg-white/60 border border-white/50 rounded-xl p-4 shadow-inner backdrop-blur-md">
+          <div className="flex flex-col">
+            <span className="text-[12px] font-bold text-text-primary">Embed Album Artwork</span>
+            <span className="text-[10px] text-text-secondary">Embeds high-quality thumbnails & metadata into Audio Only downloads (MP3).</span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input 
+              type="checkbox" 
+              className="sr-only peer" 
+              checked={localEmbedArtwork}
+              onChange={(e) => setLocalEmbedArtwork(e.target.checked)}
+            />
+            <div className="w-9 h-5 bg-black/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary"></div>
+          </label>
         </div>
 
         <button
